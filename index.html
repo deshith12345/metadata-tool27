@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="View and remove image metadata (EXIF) in your browser.">
+    <title>Meta Shield – Metadata Security</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="page">
+        <header class="header">
+            <div class="brand">
+                <h1 class="brand-title">Meta Shield</h1>
+                <p class="brand-subtitle">Inspect and clean image metadata locally in your browser.</p>
+            </div>
+        </header>
+
+        <nav class="tabs-wrapper">
+            <button class="tab-button active" data-tab="viewer">
+                <i class="fas fa-eye"></i>
+                <span>Metadata viewer</span>
+            </button>
+            <button class="tab-button" data-tab="remover">
+                <i class="fas fa-broom"></i>
+                <span>Metadata remover</span>
+            </button>
+        </nav>
+
+        <main class="main">
+            <!-- Metadata Viewer -->
+            <section id="viewer" class="tab-content active">
+                <section class="panel">
+                    <header class="panel-header">
+                        <h2><i class="fas fa-eye"></i> View image metadata</h2>
+                        <p>Select a JPG or PNG to inspect its EXIF information.</p>
+                    </header>
+
+                    <div class="upload" id="viewer-upload-area">
+                        <div class="upload-inner">
+                            <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                            <p class="upload-title">Drop an image here or choose a file</p>
+                            <p class="upload-hint">Supported formats: JPG, JPEG, PNG</p>
+                            <input type="file" id="viewer-file-input" accept="image/jpeg,image/jpg,image/png">
+                            <label class="button primary" for="viewer-file-input">
+                                <i class="fas fa-folder-open"></i>
+                                <span>Choose image</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <section class="viewer-output" id="metadata-display" style="display: none;">
+                        <div class="viewer-layout">
+                            <div class="viewer-preview">
+                                <h3>Preview</h3>
+                                <div id="file-preview" class="preview-box"></div>
+                                <dl class="file-meta">
+                                    <div>
+                                        <dt>File name</dt>
+                                        <dd id="file-name"></dd>
+                                    </div>
+                                    <div>
+                                        <dt>File size</dt>
+                                        <dd id="file-size"></dd>
+                                    </div>
+                                    <div>
+                                        <dt>Type</dt>
+                                        <dd id="file-type"></dd>
+                                    </div>
+                                    <div>
+                                        <dt>Dimensions</dt>
+                                        <dd id="file-dimensions"></dd>
+                                    </div>
+                                </dl>
+                            </div>
+
+                            <div class="viewer-table">
+                                <h3>Metadata details</h3>
+                                <div class="table-shell">
+                                    <table id="metadata-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Property</th>
+                                                <th>Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="metadata-tbody">
+                                            <!-- filled by JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </section>
+            </section>
+
+            <!-- Metadata Remover -->
+            <section id="remover" class="tab-content">
+                <section class="panel">
+                    <header class="panel-header">
+                        <h2><i class="fas fa-broom"></i> Remove sensitive metadata</h2>
+                        <p>Clean an image by stripping its EXIF metadata and download a safe copy.</p>
+                    </header>
+
+                    <div class="upload" id="remover-upload-area">
+                        <div class="upload-inner">
+                            <i class="fas fa-shield-alt upload-icon"></i>
+                            <p class="upload-title">Drop an image here or choose a file</p>
+                            <p class="upload-hint">We’ll create a new file without metadata.</p>
+                            <input type="file" id="remover-file-input" accept="image/jpeg,image/jpg,image/png">
+                            <label class="button primary" for="remover-file-input">
+                                <i class="fas fa-folder-open"></i>
+                                <span>Choose image</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <section class="remover-flow" id="processing-section" style="display: none;">
+                        <div class="remover-block">
+                            <h3><i class="fas fa-file"></i> Original file</h3>
+                            <div id="remover-file-info" class="remover-file-info"></div>
+                        </div>
+
+                        <div class="remover-block" id="metadata-preview" style="display: none;">
+                            <h3><i class="fas fa-exclamation-triangle"></i> Detected metadata</h3>
+                            <div id="found-metadata"></div>
+                        </div>
+
+                        <div class="remover-actions">
+                            <button id="clean-metadata-btn" class="button danger">
+                                <i class="fas fa-broom"></i>
+                                <span>Strip all metadata &amp; create clean file</span>
+                            </button>
+                            <p class="note">Processing happens locally – images never leave your browser.</p>
+                        </div>
+
+                        <section class="remover-results" id="result-section" style="display: none;">
+                            <div class="results-grid">
+                                <div class="results-card">
+                                    <h3>Before cleaning</h3>
+                                    <div id="before-metadata"></div>
+                                </div>
+                                <div class="results-card">
+                                    <h3>After cleaning</h3>
+                                    <div id="after-metadata"></div>
+                                </div>
+                            </div>
+
+                            <div id="cleaned-file-info" class="remover-summary"></div>
+
+                            <a id="download-link" class="button success" download>
+                                <i class="fas fa-download"></i>
+                                <span>Download clean file</span>
+                            </a>
+                        </section>
+                    </section>
+                </section>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <p>Meta Shield &middot; Built by <strong>Deshith Deemantha</strong></p>
+        </footer>
+    </div>
+
+    <!-- Libraries and scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
+    <script src="main.js"></script>
+    <script src="metadata-viewer.js"></script>
+    <script src="metadata-remover.js"></script>
+</body>
+</html>
