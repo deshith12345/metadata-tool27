@@ -1,15 +1,32 @@
-// Metadata Viewer - Reads REAL EXIF data from images
+/**
+ * MetadataViewer - Extracts and displays EXIF metadata from image files
+ * 
+ * This class handles reading real EXIF data from images using the piexifjs library.
+ * It displays comprehensive metadata including camera information, GPS coordinates,
+ * date/time information, and other embedded data.
+ */
 class MetadataViewer {
+    /**
+     * Initialize the MetadataViewer
+     * Sets up properties to track the current file and image being viewed
+     */
     constructor() {
-        this.currentFile = null;
-        this.currentImage = null;
+        this.currentFile = null;        // Currently selected file
+        this.currentImage = null;       // Loaded image element
         this.init();
     }
 
+    /**
+     * Initialize the viewer by setting up event listeners
+     */
     init() {
         this.setupEventListeners();
     }
 
+    /**
+     * Set up event listeners for file input
+     * Listens for file selection changes to trigger metadata extraction
+     */
     setupEventListeners() {
         const fileInput = document.getElementById('viewer-file-input');
         fileInput.addEventListener('change', (e) => {
@@ -17,14 +34,22 @@ class MetadataViewer {
         });
     }
 
+    /**
+     * Handle file selection and initiate metadata extraction
+     * 
+     * @param {File} file - The selected image file
+     */
     async handleFileSelection(file) {
         if (!file) return;
 
         this.currentFile = file;
-        
+
         try {
+            // Display basic file information and preview
             await this.displayFileInfo(file);
+            // Extract EXIF metadata from the image
             const metadata = await this.extractRealMetadata(file);
+            // Display the extracted metadata in a table
             this.displayMetadata(metadata);
         } catch (error) {
             console.error('Error extracting metadata:', error);
@@ -32,8 +57,15 @@ class MetadataViewer {
         }
     }
 
+    /**
+     * Display basic file information and image preview
+     * 
+     * @param {File} file - The image file to display
+     * @returns {Promise} Resolves when image is loaded and displayed
+     */
     async displayFileInfo(file) {
         return new Promise((resolve) => {
+            // Display basic file properties
             document.getElementById('file-name').textContent = file.name;
             document.getElementById('file-size').textContent = window.metadataTool.formatFileSize(file.size);
             document.getElementById('file-type').textContent = file.type || 'Unknown';
@@ -44,56 +76,71 @@ class MetadataViewer {
 
             const img = document.createElement('img');
             const reader = new FileReader();
-            
+
             reader.onload = (e) => {
                 img.src = e.target.result;
                 img.onload = () => {
                     this.currentImage = img;
-                    document.getElementById('file-dimensions').textContent = 
+                    // Display image dimensions
+                    document.getElementById('file-dimensions').textContent =
                         `${img.naturalWidth} x ${img.naturalHeight} pixels`;
                     filePreview.appendChild(img);
-                    
+
                     // Show metadata display section
                     document.getElementById('metadata-display').style.display = 'block';
                     resolve();
                 };
             };
-            
+
+            // Read file as data URL for preview
             reader.readAsDataURL(file);
         });
     }
 
+    /**
+     * Extract EXIF metadata from the image file
+     * Uses the piexifjs library to parse embedded EXIF data
+     * 
+     * @param {File} file - The image file to extract metadata from
+     * @returns {Promise<Object>} Object containing basic and EXIF metadata
+     */
     async extractRealMetadata(file) {
         return new Promise((resolve) => {
             const reader = new FileReader();
-            
+
             reader.onload = (e) => {
                 try {
                     const imageData = e.target.result;
-                    
-                    // Extract EXIF data using piexifjs
+
+                    // Extract EXIF data using piexifjs library
                     const exifObj = piexif.load(imageData);
-                    
+
                     const metadata = {
                         basic: this.getBasicMetadata(file),
                         exif: this.parseExifData(exifObj)
                     };
-                    
+
                     resolve(metadata);
                 } catch (error) {
                     console.error('Error parsing EXIF:', error);
-                    // If no EXIF data, return basic metadata only
+                    // If no EXIF data exists or parsing fails, return basic metadata only
                     resolve({
                         basic: this.getBasicMetadata(file),
                         exif: {}
                     });
                 }
             };
-            
+
             reader.readAsDataURL(file);
         });
     }
 
+    /**
+     * Get basic file metadata (non-EXIF data)
+     * 
+     * @param {File} file - The file to extract basic metadata from
+     * @returns {Object} Object containing basic file properties
+     */
     getBasicMetadata(file) {
         return {
             'File Name': file.name,
@@ -103,10 +150,17 @@ class MetadataViewer {
         };
     }
 
+    /**
+     * Parse EXIF data object into human-readable metadata
+     * Maps EXIF tag numbers to descriptive names and formats values
+     * 
+     * @param {Object} exifObj - EXIF object from piexifjs
+     * @returns {Object} Parsed metadata with human-readable keys and values
+     */
     parseExifData(exifObj) {
         const metadata = {};
-        
-        // EXIF tag names mapping
+
+        // EXIF tag names mapping - converts numeric tags to readable names
         const exifTags = {
             // Image IFD
             '0th': {
@@ -163,53 +217,71 @@ class MetadataViewer {
             }
         };
 
-        // Parse each IFD
+        // Parse each IFD (Image File Directory) section
         for (let ifd in exifTags) {
             if (exifObj[ifd]) {
                 for (let tag in exifObj[ifd]) {
+                    // Get human-readable tag name or use generic name
                     const tagName = exifTags[ifd][tag] || `${ifd} Tag ${tag}`;
                     let value = exifObj[ifd][tag];
-                    
-                    // Format the value
+
+                    // Format the value based on its type
                     if (Array.isArray(value)) {
                         if (ifd === 'GPS' && (tag === '2' || tag === '4')) {
-                            // Format GPS coordinates
+                            // Format GPS coordinates (latitude/longitude) specially
                             value = this.formatGPSCoordinate(value);
                         } else {
+                            // Join array values with commas
                             value = value.join(', ');
                         }
                     } else if (typeof value === 'object') {
+                        // Convert complex objects to JSON string
                         value = JSON.stringify(value);
                     }
-                    
+
+                    // Only include non-empty values
                     if (value !== undefined && value !== null && value !== '') {
                         metadata[tagName] = value;
                     }
                 }
             }
         }
-        
+
         return metadata;
     }
 
+    /**
+     * Format GPS coordinates from EXIF format to degrees/minutes/seconds
+     * EXIF stores GPS as arrays of rational numbers [degrees, minutes, seconds]
+     * 
+     * @param {Array} coord - GPS coordinate array from EXIF
+     * @returns {string} Formatted coordinate string (e.g., "40° 26' 46.30\"")
+     */
     formatGPSCoordinate(coord) {
         if (!Array.isArray(coord) || coord.length !== 3) return coord;
-        
+
+        // Convert rational numbers to decimal values
         const degrees = coord[0][0] / coord[0][1];
         const minutes = coord[1][0] / coord[1][1];
         const seconds = coord[2][0] / coord[2][1];
-        
+
         return `${degrees}° ${minutes}' ${seconds.toFixed(2)}"`;
     }
 
+    /**
+     * Display extracted metadata in a table format
+     * Shows both basic file information and EXIF data if available
+     * 
+     * @param {Object} metadata - Object containing basic and exif metadata
+     */
     displayMetadata(metadata) {
         const tbody = document.getElementById('metadata-tbody');
         tbody.innerHTML = '';
 
-        // Display basic metadata
+        // Display basic metadata section
         this.addMetadataRows(tbody, 'Basic File Information', metadata.basic, false);
-        
-        // Display EXIF data if available
+
+        // Display EXIF data if available, otherwise show "no metadata" message
         if (Object.keys(metadata.exif).length > 0) {
             this.addMetadataRows(tbody, 'EXIF Metadata (Sensitive Data)', metadata.exif, true);
         } else {
@@ -226,8 +298,17 @@ class MetadataViewer {
         }
     }
 
+    /**
+     * Add metadata rows to the table
+     * Creates a section header and individual rows for each metadata field
+     * 
+     * @param {HTMLElement} tbody - Table body element to append rows to
+     * @param {string} sectionTitle - Title for this metadata section
+     * @param {Object} metadata - Metadata key-value pairs to display
+     * @param {boolean} checkSensitive - Whether to check for sensitive data (unused)
+     */
     addMetadataRows(tbody, sectionTitle, metadata, checkSensitive = false) {
-        // Add section header
+        // Add section header row
         const headerRow = document.createElement('tr');
         headerRow.innerHTML = `
             <td colspan="2" style="background: var(--light); font-weight: bold; padding: 1rem;">
@@ -236,20 +317,23 @@ class MetadataViewer {
         `;
         tbody.appendChild(headerRow);
 
-        // Add metadata rows
+        // Add individual metadata rows
         Object.entries(metadata).forEach(([key, value]) => {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td style="font-weight: 600;">${key}</td>
                 <td>${value}</td>
             `;
-            
+
             tbody.appendChild(row);
         });
     }
 }
 
-// Initialize Metadata Viewer when DOM is loaded
+/**
+ * Initialize the MetadataViewer when DOM is fully loaded
+ * Creates a global instance accessible to other modules
+ */
 document.addEventListener('DOMContentLoaded', () => {
     window.metadataViewer = new MetadataViewer();
 });
