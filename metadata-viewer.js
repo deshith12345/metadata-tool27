@@ -229,7 +229,9 @@ class MetadataViewer {
                     if (Array.isArray(value)) {
                         if (ifd === 'GPS' && (tag === '2' || tag === '4')) {
                             // Format GPS coordinates (latitude/longitude) specially
-                            value = this.formatGPSCoordinate(value);
+                            // DEBUG: Append raw value to see what is happening
+                            const formatted = this.formatGPSCoordinate(value);
+                            value = `${formatted} <br><div style="font-size:10px; color:#666; font-family:monospace; margin-top:4px;">Raw: ${JSON.stringify(value)}</div>`;
                         } else {
                             // Join array values with commas
                             value = value.join(', ');
