@@ -260,10 +260,25 @@ class MetadataViewer {
     formatGPSCoordinate(coord) {
         if (!Array.isArray(coord) || coord.length !== 3) return coord;
 
-        // Convert rational numbers to decimal values
-        const degrees = coord[0][0] / coord[0][1];
-        const minutes = coord[1][0] / coord[1][1];
-        const seconds = coord[2][0] / coord[2][1];
+        let degrees, minutes, seconds;
+
+        // Check if values are already numbers (simplified format common on some mobile browsers)
+        if (typeof coord[0] === 'number') {
+            degrees = coord[0];
+            minutes = coord[1];
+            seconds = coord[2];
+        } else {
+            // Assume rational arrays [[n,d], [n,d], [n,d]]
+            // Add safety check for division by zero to prevent NaN
+            degrees = coord[0][1] !== 0 ? coord[0][0] / coord[0][1] : 0;
+            minutes = coord[1][1] !== 0 ? coord[1][0] / coord[1][1] : 0;
+            seconds = coord[2][1] !== 0 ? coord[2][0] / coord[2][1] : 0;
+        }
+
+        // Handle any remaining NaNs gracefully
+        if (isNaN(degrees)) degrees = 0;
+        if (isNaN(minutes)) minutes = 0;
+        if (isNaN(seconds)) seconds = 0;
 
         return `${degrees}° ${minutes}' ${seconds.toFixed(2)}"`;
     }
