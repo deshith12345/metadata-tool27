@@ -284,6 +284,27 @@ class MetadataViewer {
         // Display EXIF data if available, otherwise show "no metadata" message
         if (Object.keys(metadata.exif).length > 0) {
             this.addMetadataRows(tbody, 'EXIF Metadata (Sensitive Data)', metadata.exif, true);
+
+            // Check if GPS data is missing (common on mobile uploads due to privacy stripping)
+            const hasGPS = Object.keys(metadata.exif).some(key => key.startsWith('GPS'));
+            if (!hasGPS) {
+                const warningRow = document.createElement('tr');
+                warningRow.innerHTML = `
+                    <td colspan="2" style="background-color: #fffbeb; color: #92400e; padding: 1rem; border-left: 4px solid #f59e0b;">
+                        <div style="display: flex; gap: 10px; align-items: flex-start;">
+                            <i class="fas fa-location-slash" style="margin-top: 3px;"></i>
+                            <div>
+                                <strong>Location data not found</strong><br>
+                                <small>
+                                    If you took this photo on a mobile device, the browser or OS likely stripped the GPS location 
+                                    during upload to protect your privacy. This is a standard security feature on iOS and Android.
+                                </small>
+                            </div>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(warningRow);
+            }
         } else {
             const row = document.createElement('tr');
             row.innerHTML = `
