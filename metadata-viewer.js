@@ -6,6 +6,11 @@
  * date/time information, and other embedded data.
  */
 class MetadataViewer {
+    // Configuration constants
+    static MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+    static ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
+    static DEBUG = false; // Set to true for debugging
+
     /**
      * Initialize the MetadataViewer
      * Sets up properties to track the current file and image being viewed
@@ -13,6 +18,8 @@ class MetadataViewer {
     constructor() {
         this.currentFile = null;        // Currently selected file
         this.currentImage = null;       // Loaded image element
+        this.currentImageUrl = null;    // Object URL for current image
+        this.currentMetadata = null;    // Stored metadata for export
         this.init();
     }
 
@@ -24,7 +31,7 @@ class MetadataViewer {
     }
 
     /**
-     * Set up event listeners for file input
+     * Set up event listeners for file input and export button
      * Listens for file selection changes to trigger metadata extraction
      */
     setupEventListeners() {
@@ -32,6 +39,14 @@ class MetadataViewer {
         fileInput.addEventListener('change', (e) => {
             this.handleFileSelection(e.target.files[0]);
         });
+
+        // Export button event listener
+        const exportBtn = document.getElementById('export-metadata-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                this.exportMetadataAsJSON();
+            });
+        }
     }
 
     /**
@@ -42,6 +57,29 @@ class MetadataViewer {
     async handleFileSelection(file) {
         if (!file) return;
 
+        // Validate file type
+        if (!MetadataViewer.ACCEPTED_TYPES.includes(file.type.toLowerCase())) {
+            window.metadataTool?.showNotification(
+                'Please select a valid image file (JPG, JPEG, or PNG)',
+                'error'
+            );
+            return;
+        }
+
+        // Validate file size
+        if (file.size > MetadataViewer.MAX_FILE_SIZE) {
+            window.metadataTool?.showNotification(
+                'File is too large. Maximum size is 50MB',
+                'error'
+            );
+            return;
+        }
+
+        // Revoke previous object URLs to prevent memory leaks
+        if (this.currentImageUrl) {
+            URL.revokeObjectURL(this.currentImageUrl);
+        }
+
         this.currentFile = file;
 
         try {
@@ -49,16 +87,18 @@ class MetadataViewer {
             await this.displayFileInfo(file);
             // Extract EXIF metadata from the image
             const metadata = await this.extractRealMetadata(file);
+            this.currentMetadata = metadata;
             // Display the extracted metadata in a table
             this.displayMetadata(metadata);
         } catch (error) {
             console.error('Error extracting metadata:', error);
-            window.metadataTool.showNotification('Error extracting metadata from file', 'error');
+            window.metadataTool?.showNotification('Error extracting metadata from file', 'error');
         }
     }
 
     /**
      * Display basic file information and image preview
+     * Uses createObjectURL for better performance than FileReader
      * 
      * @param {File} file - The image file to display
      * @returns {Promise} Resolves when image is loaded and displayed
@@ -75,25 +115,26 @@ class MetadataViewer {
             filePreview.innerHTML = '';
 
             const img = document.createElement('img');
-            const reader = new FileReader();
+            this.currentImageUrl = URL.createObjectURL(file); // Faster than FileReader
+            img.src = this.currentImageUrl;
 
-            reader.onload = (e) => {
-                img.src = e.target.result;
-                img.onload = () => {
-                    this.currentImage = img;
-                    // Display image dimensions
-                    document.getElementById('file-dimensions').textContent =
-                        `${img.naturalWidth} x ${img.naturalHeight} pixels`;
-                    filePreview.appendChild(img);
+            img.onload = () => {
+                this.currentImage = img;
+                // Display image dimensions
+                document.getElementById('file-dimensions').textContent =
+                    `${img.naturalWidth} x ${img.naturalHeight} pixels`;
+                filePreview.appendChild(img);
 
-                    // Show metadata display section
-                    document.getElementById('metadata-display').style.display = 'block';
-                    resolve();
-                };
+                // Show metadata display section
+                document.getElementById('metadata-display').style.display = 'block';
+                resolve();
             };
 
-            // Read file as data URL for preview
-            reader.readAsDataURL(file);
+            img.onerror = () => {
+                URL.revokeObjectURL(this.currentImageUrl);
+                window.metadataTool?.showNotification('Failed to load image preview', 'error');
+                resolve();
+            };
         });
     }
 
@@ -115,27 +156,34 @@ class MetadataViewer {
                     // Extract EXIF data using piexifjs library
                     const exifObj = piexif.load(imageData);
 
-                    // DEBUG: Log GPS data to console for mobile debugging
-                    if (exifObj.GPS) {
+                    // Debug logging (only if DEBUG is enabled)
+                    if (MetadataViewer.DEBUG && exifObj.GPS) {
                         console.log('GPS EXIF Data:', exifObj.GPS);
                         console.log('GPS Latitude (tag 2):', exifObj.GPS[2]);
                         console.log('GPS Longitude (tag 4):', exifObj.GPS[4]);
-                    } else {
-                        console.log('No GPS data found in EXIF');
                     }
 
                     const metadata = {
                         basic: this.getBasicMetadata(file),
-                        exif: this.parseExifData(exifObj)
+                        exif: this.parseExifData(exifObj),
+                        rawExif: exifObj // Store raw EXIF for export
                     };
 
                     resolve(metadata);
                 } catch (error) {
                     console.error('Error parsing EXIF:', error);
+
+                    const errorMessage = error.message.includes('JPEG')
+                        ? 'This image format may not contain EXIF data'
+                        : 'Unable to read metadata from this file';
+
+                    window.metadataTool?.showNotification(errorMessage, 'warning');
+
                     // If no EXIF data exists or parsing fails, return basic metadata only
                     resolve({
                         basic: this.getBasicMetadata(file),
-                        exif: {}
+                        exif: {},
+                        rawExif: null
                     });
                 }
             };
@@ -194,13 +242,16 @@ class MetadataViewer {
                 '36864': 'EXIF Version',
                 '36867': 'Date/Time Original',
                 '36868': 'Date/Time Digitized',
-                '37377': 'Shutter Speed',
+                '37377': 'Shutter Speed (APEX)',
                 '37378': 'Aperture',
                 '37380': 'Exposure Bias',
                 '37381': 'Max Aperture',
                 '37383': 'Metering Mode',
                 '37385': 'Flash',
                 '37386': 'Focal Length',
+                '37520': 'Subsec Time',
+                '37521': 'Subsec Time Original',
+                '37522': 'Subsec Time Digitized',
                 '40960': 'FlashPix Version',
                 '40961': 'Color Space',
                 '40962': 'Pixel X Dimension',
@@ -209,7 +260,18 @@ class MetadataViewer {
                 '41487': 'Focal Plane Y Resolution',
                 '41495': 'Sensing Method',
                 '41728': 'File Source',
-                '41729': 'Scene Type'
+                '41729': 'Scene Type',
+                '41985': 'Custom Rendered',
+                '41986': 'Exposure Mode',
+                '41987': 'White Balance',
+                '41988': 'Digital Zoom Ratio',
+                '41989': 'Focal Length (35mm)',
+                '41990': 'Scene Capture Type',
+                '41991': 'Gain Control',
+                '41992': 'Contrast',
+                '41993': 'Saturation',
+                '41994': 'Sharpness',
+                '42016': 'Image Unique ID'
             },
             // GPS IFD
             'GPS': {
@@ -226,6 +288,9 @@ class MetadataViewer {
             }
         };
 
+        // Store GPS coordinates for map link generation
+        let gpsLat = null, gpsLon = null, gpsLatRef = null, gpsLonRef = null;
+
         // Parse each IFD (Image File Directory) section
         for (let ifd in exifTags) {
             if (exifObj[ifd]) {
@@ -233,6 +298,14 @@ class MetadataViewer {
                     // Get human-readable tag name or use generic name
                     const tagName = exifTags[ifd][tag] || `${ifd} Tag ${tag}`;
                     let value = exifObj[ifd][tag];
+
+                    // Store GPS data for later processing
+                    if (ifd === 'GPS') {
+                        if (tag === '2') gpsLat = value;
+                        if (tag === '4') gpsLon = value;
+                        if (tag === '1') gpsLatRef = value;
+                        if (tag === '3') gpsLonRef = value;
+                    }
 
                     // Format the value based on its type
                     if (Array.isArray(value)) {
@@ -256,15 +329,44 @@ class MetadataViewer {
             }
         }
 
+        // Add GPS map link if coordinates are available
+        if (gpsLat && gpsLon) {
+            const mapLink = this.addGPSMapLink(gpsLat, gpsLon, gpsLatRef, gpsLonRef);
+            if (mapLink) {
+                metadata['📍 Location on Map'] = mapLink;
+            }
+        }
+
         return metadata;
     }
 
     /**
-     * Format GPS coordinates from EXIF format to degrees/minutes/seconds
+     * Convert rational number to decimal
+     * @param {Array} rational - [numerator, denominator]
+     * @returns {number} Decimal value
+     */
+    convertRational(rational) {
+        if (!Array.isArray(rational) || rational.length !== 2) return 0;
+        return rational[1] !== 0 ? rational[0] / rational[1] : 0;
+    }
+
+    /**
+     * Sanitize number (handle NaN and Infinity)
+     * @param {number} num - Number to sanitize
+     * @returns {number} Sanitized number
+     */
+    sanitizeNumber(num) {
+        return isNaN(num) || !isFinite(num) ? 0 : num;
+    }
+
+    /**
+     * Format GPS coordinates from EXIF format to degrees/minutes/seconds with decimal
      * EXIF stores GPS as arrays of rational numbers [degrees, minutes, seconds]
      * 
      * @param {Array} coord - GPS coordinate array from EXIF
-     * @returns {string} Formatted coordinate string (e.g., "40° 26' 46.30\"")
+     * @returns {string} Formatted coordinate string (e.g., "40° 26' 46.30\" (40.446389°)")
+     * @example
+     * formatGPSCoordinate([[40,1], [26,1], [4630,100]]) // "40° 26' 46.30" (40.446389°)"
      */
     formatGPSCoordinate(coord) {
         if (!Array.isArray(coord) || coord.length !== 3) return coord;
@@ -277,19 +379,99 @@ class MetadataViewer {
             minutes = coord[1];
             seconds = coord[2];
         } else {
-            // Assume rational arrays [[n,d], [n,d], [n,d]]
-            // Add safety check for division by zero to prevent NaN
-            degrees = coord[0][1] !== 0 ? coord[0][0] / coord[0][1] : 0;
-            minutes = coord[1][1] !== 0 ? coord[1][0] / coord[1][1] : 0;
-            seconds = coord[2][1] !== 0 ? coord[2][0] / coord[2][1] : 0;
+            // Convert rational arrays [[n,d], [n,d], [n,d]]
+            degrees = this.convertRational(coord[0]);
+            minutes = this.convertRational(coord[1]);
+            seconds = this.convertRational(coord[2]);
         }
 
-        // Handle any remaining NaNs gracefully
-        if (isNaN(degrees)) degrees = 0;
-        if (isNaN(minutes)) minutes = 0;
-        if (isNaN(seconds)) seconds = 0;
+        // Validate and sanitize
+        degrees = this.sanitizeNumber(degrees);
+        minutes = this.sanitizeNumber(minutes);
+        seconds = this.sanitizeNumber(seconds);
 
-        return `${degrees}° ${minutes}' ${seconds.toFixed(2)}"`;
+        // Convert to decimal degrees for easier usage
+        const decimal = degrees + (minutes / 60) + (seconds / 3600);
+
+        return `${degrees}° ${minutes}' ${seconds.toFixed(2)}" (${decimal.toFixed(6)}°)`;
+    }
+
+    /**
+     * Convert GPS coordinates to decimal and create a map link
+     * @param {Array} latitude - GPS latitude array
+     * @param {Array} longitude - GPS longitude array  
+     * @param {string} latRef - 'N' or 'S'
+     * @param {string} lonRef - 'E' or 'W'
+     * @returns {string|null} HTML link to Google Maps or null
+     */
+    addGPSMapLink(latitude, longitude, latRef, lonRef) {
+        const lat = this.convertGPSToDecimal(latitude, latRef);
+        const lon = this.convertGPSToDecimal(longitude, lonRef);
+
+        if (lat !== null && lon !== null) {
+            return `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;">
+                View on map (${lat.toFixed(6)}, ${lon.toFixed(6)})
+            </a>`;
+        }
+        return null;
+    }
+
+    /**
+     * Convert GPS coordinate to decimal degrees
+     * @param {Array} coord - GPS coordinate array
+     * @param {string} ref - Reference (N/S for latitude, E/W for longitude)
+     * @returns {number|null} Decimal degrees or null
+     */
+    convertGPSToDecimal(coord, ref) {
+        if (!Array.isArray(coord) || coord.length !== 3) return null;
+
+        let degrees, minutes, seconds;
+        if (typeof coord[0] === 'number') {
+            degrees = coord[0];
+            minutes = coord[1];
+            seconds = coord[2];
+        } else {
+            degrees = this.convertRational(coord[0]);
+            minutes = this.convertRational(coord[1]);
+            seconds = this.convertRational(coord[2]);
+        }
+
+        let decimal = degrees + (minutes / 60) + (seconds / 3600);
+
+        // Apply hemisphere (negative for South and West)
+        if (ref === 'S' || ref === 'W') {
+            decimal *= -1;
+        }
+
+        return decimal;
+    }
+
+    /**
+     * Export current metadata as JSON file
+     */
+    exportMetadataAsJSON() {
+        if (!this.currentMetadata || !this.currentFile) {
+            window.metadataTool?.showNotification('No metadata to export', 'warning');
+            return;
+        }
+
+        const exportData = {
+            fileName: this.currentFile.name,
+            fileSize: this.currentFile.size,
+            extractedAt: new Date().toISOString(),
+            basicInfo: this.currentMetadata.basic,
+            exifData: this.currentMetadata.exif
+        };
+
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${this.currentFile.name.replace(/\.[^/.]+$/, '')}-metadata.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        window.metadataTool?.showNotification('Metadata exported successfully', 'success');
     }
 
     /**
