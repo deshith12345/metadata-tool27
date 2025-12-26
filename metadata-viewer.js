@@ -115,6 +115,15 @@ class MetadataViewer {
                     // Extract EXIF data using piexifjs library
                     const exifObj = piexif.load(imageData);
 
+                    // DEBUG: Log GPS data to console for mobile debugging
+                    if (exifObj.GPS) {
+                        console.log('GPS EXIF Data:', exifObj.GPS);
+                        console.log('GPS Latitude (tag 2):', exifObj.GPS[2]);
+                        console.log('GPS Longitude (tag 4):', exifObj.GPS[4]);
+                    } else {
+                        console.log('No GPS data found in EXIF');
+                    }
+
                     const metadata = {
                         basic: this.getBasicMetadata(file),
                         exif: this.parseExifData(exifObj)
