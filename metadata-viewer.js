@@ -115,11 +115,13 @@ class MetadataViewer {
                     // Extract EXIF data using piexifjs library
                     const exifObj = piexif.load(imageData);
 
-                    // DEBUG: Log GPS data to console for mobile debugging
+                    // DEBUG: Log GPS data to console for debugging
                     if (exifObj.GPS) {
                         console.log('GPS EXIF Data:', exifObj.GPS);
                         console.log('GPS Latitude (tag 2):', exifObj.GPS[2]);
                         console.log('GPS Longitude (tag 4):', exifObj.GPS[4]);
+                        console.log('GPS Latitude Ref (tag 1):', exifObj.GPS[1]);
+                        console.log('GPS Longitude Ref (tag 3):', exifObj.GPS[3]);
                     } else {
                         console.log('No GPS data found in EXIF');
                     }
@@ -267,28 +269,44 @@ class MetadataViewer {
      * @returns {string} Formatted coordinate string (e.g., "40° 26' 46.30\"")
      */
     formatGPSCoordinate(coord) {
-        if (!Array.isArray(coord) || coord.length !== 3) return coord;
+        // Validate input
+        if (!Array.isArray(coord) || coord.length !== 3) {
+            console.log('Invalid GPS coordinate format:', coord);
+            return String(coord);
+        }
 
         let degrees, minutes, seconds;
 
-        // Check if values are already numbers (simplified format common on some mobile browsers)
-        if (typeof coord[0] === 'number') {
-            degrees = coord[0];
-            minutes = coord[1];
-            seconds = coord[2];
+        // Check if it's a rational array format by checking if first element is an array
+        if (Array.isArray(coord[0]) && coord[0].length === 2) {
+            // Standard EXIF rational format: [[degrees_num, degrees_den], [min_num, min_den], [sec_num, sec_den]]
+            console.log('Processing rational GPS format:', coord);
+            
+            // Safely extract rational values with comprehensive checks
+            degrees = (coord[0][1] !== 0 && coord[0][1] !== undefined && coord[0][0] !== undefined) 
+                ? coord[0][0] / coord[0][1] 
+                : 0;
+            minutes = (coord[1][1] !== 0 && coord[1][1] !== undefined && coord[1][0] !== undefined) 
+                ? coord[1][0] / coord[1][1] 
+                : 0;
+            seconds = (coord[2][1] !== 0 && coord[2][1] !== undefined && coord[2][0] !== undefined) 
+                ? coord[2][0] / coord[2][1] 
+                : 0;
         } else {
-            // Assume rational arrays [[n,d], [n,d], [n,d]]
-            // Add safety check for division by zero to prevent NaN
-            degrees = coord[0][1] !== 0 ? coord[0][0] / coord[0][1] : 0;
-            minutes = coord[1][1] !== 0 ? coord[1][0] / coord[1][1] : 0;
-            seconds = coord[2][1] !== 0 ? coord[2][0] / coord[2][1] : 0;
+            // Simplified format: [degrees, minutes, seconds] as plain numbers
+            console.log('Processing simplified GPS format:', coord);
+            degrees = typeof coord[0] === 'number' ? coord[0] : 0;
+            minutes = typeof coord[1] === 'number' ? coord[1] : 0;
+            seconds = typeof coord[2] === 'number' ? coord[2] : 0;
         }
 
-        // Handle any remaining NaNs gracefully
-        if (isNaN(degrees)) degrees = 0;
-        if (isNaN(minutes)) minutes = 0;
-        if (isNaN(seconds)) seconds = 0;
+        // Handle any remaining NaNs or invalid values
+        if (isNaN(degrees) || degrees === undefined || degrees === null) degrees = 0;
+        if (isNaN(minutes) || minutes === undefined || minutes === null) minutes = 0;
+        if (isNaN(seconds) || seconds === undefined || seconds === null) seconds = 0;
 
+        console.log(`Formatted GPS: ${degrees}° ${minutes}' ${seconds.toFixed(2)}"`);
+        
         return `${degrees}° ${minutes}' ${seconds.toFixed(2)}"`;
     }
 
