@@ -482,7 +482,7 @@ class MetadataViewer {
 
         if (!this.hasUsableGPSCoordinatePair(latDecimal, lonDecimal)) {
             this.removeCoordinateMetadata(metadata);
-            metadata['GPS Location Status'] = 'No usable GPS coordinates embedded in this image';
+            metadata['GPS Location Status'] = this.getGPSPlaceholderMessage();
             return;
         }
 
@@ -506,7 +506,7 @@ class MetadataViewer {
         if (!latitude || !longitude) return {};
         if (!this.hasUsableGPSCoordinatePair(latitude.decimal, longitude.decimal)) {
             return {
-                'GPS Location Status': 'No usable GPS coordinates embedded in this image'
+                'GPS Location Status': this.getGPSPlaceholderMessage()
             };
         }
 
@@ -733,7 +733,7 @@ class MetadataViewer {
                 metadata['Location on Map'] = this.createMapLink(latDecimal, lonDecimal);
             } else {
                 this.removeCoordinateMetadata(metadata);
-                metadata['GPS Location Status'] = 'No usable GPS coordinates embedded in this image';
+                metadata['GPS Location Status'] = this.getGPSPlaceholderMessage();
             }
         }
 
@@ -938,6 +938,10 @@ class MetadataViewer {
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
         if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
         return !(Math.abs(lat) < 0.000001 && Math.abs(lon) < 0.000001);
+    }
+
+    getGPSPlaceholderMessage() {
+        return 'GPS coordinate tags are present, but latitude/longitude are zero placeholders. This image file does not contain usable location coordinates.';
     }
 
     normalizeGPSRef(ref) {
