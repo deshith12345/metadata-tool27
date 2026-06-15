@@ -28,6 +28,10 @@
                 <i class="fas fa-broom"></i>
                 <span>Metadata remover</span>
             </button>
+            <button class="tab-button" data-tab="steganography">
+                <i class="fas fa-user-secret"></i>
+                <span>Steganography</span>
+            </button>
         </nav>
 
         <main class="main">
@@ -170,6 +174,84 @@
                     </section>
                 </section>
             </section>
+
+            <!-- Steganography -->
+            <section id="steganography" class="tab-content">
+                <section class="panel">
+                    <header class="panel-header">
+                        <h2><i class="fas fa-user-secret"></i> Hide and reveal messages</h2>
+                        <p>Encode text inside image pixels and reveal hidden text from stego images locally.</p>
+                    </header>
+
+                    <div class="stego-layout">
+                        <section class="stego-card">
+                            <h3><i class="fas fa-lock"></i> Hide text in an image</h3>
+                            <div class="upload compact" id="stego-encode-upload-area">
+                                <div class="upload-inner">
+                                    <i class="fas fa-image upload-icon"></i>
+                                    <p class="upload-title">Choose a cover image</p>
+                                    <p class="upload-hint">JPG and PNG are supported. Output is PNG.</p>
+                                    <input type="file" id="stego-encode-file-input" accept="image/jpeg,image/jpg,image/png"
+                                        aria-label="Select cover image for steganography">
+                                    <label class="button primary" for="stego-encode-file-input">
+                                        <i class="fas fa-folder-open"></i>
+                                        <span>Choose image</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div id="stego-encode-file-info" class="stego-file-info"></div>
+
+                            <label class="stego-label" for="stego-message-input">Message to hide</label>
+                            <textarea id="stego-message-input" class="stego-textarea" rows="6"
+                                placeholder="Type the message you want to hide"></textarea>
+                            <div class="stego-capacity" id="stego-capacity"></div>
+
+                            <button id="stego-encode-btn" class="button danger">
+                                <i class="fas fa-lock"></i>
+                                <span>Create stego image</span>
+                            </button>
+
+                            <section id="stego-encode-result" class="stego-result" style="display: none;">
+                                <div id="stego-encode-summary"></div>
+                                <a id="stego-download-link" class="button success" download>
+                                    <i class="fas fa-download"></i>
+                                    <span>Download stego PNG</span>
+                                </a>
+                            </section>
+                        </section>
+
+                        <section class="stego-card">
+                            <h3><i class="fas fa-unlock"></i> Reveal hidden text</h3>
+                            <div class="upload compact" id="stego-decode-upload-area">
+                                <div class="upload-inner">
+                                    <i class="fas fa-file-image upload-icon"></i>
+                                    <p class="upload-title">Choose a stego image</p>
+                                    <p class="upload-hint">Use a PNG created by this tool.</p>
+                                    <input type="file" id="stego-decode-file-input" accept="image/png,image/jpeg,image/jpg"
+                                        aria-label="Select stego image to reveal hidden message">
+                                    <label class="button primary" for="stego-decode-file-input">
+                                        <i class="fas fa-folder-open"></i>
+                                        <span>Choose image</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div id="stego-decode-file-info" class="stego-file-info"></div>
+
+                            <button id="stego-decode-btn" class="button primary">
+                                <i class="fas fa-unlock"></i>
+                                <span>Reveal message</span>
+                            </button>
+
+                            <section id="stego-decode-result" class="stego-result" style="display: none;">
+                                <h4>Hidden message</h4>
+                                <pre id="stego-revealed-message"></pre>
+                            </section>
+                        </section>
+                    </div>
+                </section>
+            </section>
         </main>
 
         <footer class="footer">
@@ -182,6 +264,7 @@
     <script defer src="main.js"></script>
     <script defer src="metadata-viewer.js?v=2.0"></script>
     <script defer src="metadata-remover.js"></script>
+    <script defer src="steganography.js"></script>
 </body>
 
 </html>

@@ -6,6 +6,10 @@
  * camera information, timestamps, and any other embedded metadata.
  */
 class MetadataRemover {
+    static MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+    static ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
+    static ACCEPTED_EXTENSIONS = ['jpg', 'jpeg', 'png'];
+
     /**
      * Initialize the MetadataRemover
      * Sets up properties to track files and metadata throughout the removal process
@@ -13,6 +17,7 @@ class MetadataRemover {
     constructor() {
         this.currentFile = null;              // Original file selected by user
         this.cleanedFile = null;              // Cleaned file after metadata removal
+        this.cleanedFileUrl = null;           // Object URL for the cleaned download
         this.originalExifData = null;         // Original EXIF data for comparison
         this.originalMetadataCount = 0;       // Count of metadata fields in original
         this.init();
@@ -49,16 +54,98 @@ class MetadataRemover {
      */
     async handleFileSelection(file) {
         if (!file) return;
+        if (!this.isAcceptedFile(file)) {
+            window.metadataTool?.showNotification('Please select a valid image file (JPG, JPEG, or PNG)', 'error');
+            return;
+        }
 
+        if (file.size > MetadataRemover.MAX_FILE_SIZE) {
+            window.metadataTool?.showNotification('File is too large. Maximum size is 50MB', 'error');
+            return;
+        }
+
+        this.revokeCleanedFileUrl();
         this.currentFile = file;
+        this.cleanedFile = null;
         this.displayFileInfo(file);
 
         // Analyze and count metadata fields in the original file
-        await this.analyzeOriginalMetadata(file);
+        await this.analyzeOriginalMetadataSafe(file);
 
         // Show processing section, hide results until cleaning is complete
         document.getElementById('processing-section').style.display = 'block';
         document.getElementById('result-section').style.display = 'none';
+    }
+
+    isAcceptedFile(file) {
+        const type = (file.type || '').toLowerCase();
+        const extension = window.metadataTool?.getFileExtension(file.name) || '';
+        return MetadataRemover.ACCEPTED_TYPES.includes(type) ||
+            MetadataRemover.ACCEPTED_EXTENSIONS.includes(extension);
+    }
+
+    async analyzeOriginalMetadataSafe(file) {
+        try {
+            if (window.metadataViewer?.extractRealMetadata) {
+                const metadata = await window.metadataViewer.extractRealMetadata(file);
+                const fields = Object.keys(metadata.exif || {}).filter(key => key !== 'Location on Map');
+                this.originalExifData = metadata.rawExif;
+                this.originalMetadataCount = fields.length;
+                this.renderMetadataPreview(fields);
+                return;
+            }
+        } catch (error) {
+            console.warn('Unable to analyze metadata with viewer parser:', error);
+        }
+
+        this.originalExifData = null;
+        this.originalMetadataCount = 0;
+        this.renderMetadataPreview([]);
+    }
+
+    renderMetadataPreview(fields) {
+        const metadataPreview = document.getElementById('metadata-preview');
+        const foundMetadata = document.getElementById('found-metadata');
+        metadataPreview.style.display = 'block';
+        foundMetadata.replaceChildren();
+
+        if (fields.length > 0) {
+            const summary = document.createElement('p');
+            const strong = document.createElement('strong');
+            strong.textContent = `Found ${fields.length} metadata fields in this image:`;
+            summary.appendChild(strong);
+
+            const fieldList = document.createElement('ul');
+            fields.forEach(field => {
+                const item = document.createElement('li');
+                item.textContent = field;
+                fieldList.appendChild(item);
+            });
+
+            const warning = document.createElement('p');
+            warning.className = 'warning-message';
+            warning.textContent = 'This metadata may contain sensitive information including:';
+
+            const sensitiveList = document.createElement('ul');
+            ['GPS location data', 'Camera make and model', 'Date and time photos were taken', 'Software used to edit the image', 'Author/copyright information']
+                .forEach(label => {
+                    const item = document.createElement('li');
+                    item.textContent = label;
+                    sensitiveList.appendChild(item);
+                });
+
+            foundMetadata.append(summary, fieldList, warning, sensitiveList);
+            return;
+        }
+
+        const success = document.createElement('p');
+        success.className = 'success-message';
+        success.textContent = 'No metadata detected in this image';
+
+        const note = document.createElement('p');
+        note.textContent = 'This image appears to be clean already, but you can still process it to ensure no hidden metadata exists.';
+
+        foundMetadata.append(success, note);
     }
 
     /**
@@ -68,11 +155,19 @@ class MetadataRemover {
      */
     displayFileInfo(file) {
         const fileInfoDiv = document.getElementById('remover-file-info');
-        fileInfoDiv.innerHTML = `
-            <p><strong>File Name:</strong> ${file.name}</p>
-            <p><strong>File Size:</strong> ${window.metadataTool.formatFileSize(file.size)}</p>
-            <p><strong>File Type:</strong> ${file.type || 'Unknown'}</p>
-        `;
+        fileInfoDiv.replaceChildren(
+            this.createInfoLine('File Name:', file.name),
+            this.createInfoLine('File Size:', window.metadataTool.formatFileSize(file.size)),
+            this.createInfoLine('File Type:', file.type || 'Unknown')
+        );
+    }
+
+    createInfoLine(label, value) {
+        const paragraph = document.createElement('p');
+        const strong = document.createElement('strong');
+        strong.textContent = label;
+        paragraph.append(strong, ` ${value}`);
+        return paragraph;
     }
 
     /**
@@ -83,6 +178,8 @@ class MetadataRemover {
      * @returns {Promise} Resolves when analysis is complete
      */
     async analyzeOriginalMetadata(file) {
+        return this.analyzeOriginalMetadataSafe(file);
+
         return new Promise((resolve) => {
             const reader = new FileReader();
 
@@ -223,6 +320,10 @@ class MetadataRemover {
 
                         // Draw the image onto the canvas (this removes metadata)
                         const ctx = canvas.getContext('2d');
+                        if (!ctx) {
+                            reject(new Error('Canvas is not available in this browser'));
+                            return;
+                        }
                         ctx.drawImage(img, 0, 0);
 
                         // Convert canvas to blob (creates new file without metadata)
@@ -230,14 +331,17 @@ class MetadataRemover {
                             if (blob) {
                                 // Generate filename for cleaned file
                                 const originalName = file.name.replace(/\.[^/.]+$/, '');
-                                const extension = window.metadataTool.getFileExtension(file.name);
+                                const outputType = this.getOutputMimeType(file);
+                                const extension = outputType === 'image/png'
+                                    ? 'png'
+                                    : (window.metadataTool.getFileExtension(file.name) === 'jpeg' ? 'jpeg' : 'jpg');
 
                                 // Create new File object from blob (metadata-free)
                                 const cleanedFile = new File(
                                     [blob],
                                     `${originalName}_cleaned.${extension}`,
                                     {
-                                        type: file.type,
+                                        type: outputType,
                                         lastModified: Date.now()
                                     }
                                 );
@@ -246,7 +350,7 @@ class MetadataRemover {
                             } else {
                                 reject(new Error('Failed to create cleaned file'));
                             }
-                        }, file.type, 0.92); // High quality (92%)
+                        }, this.getOutputMimeType(file), this.getOutputMimeType(file) === 'image/jpeg' ? 0.92 : undefined);
                     };
 
                     img.onerror = () => reject(new Error('Failed to load image'));
@@ -260,6 +364,34 @@ class MetadataRemover {
             reader.onerror = () => reject(new Error('Failed to read file'));
             reader.readAsDataURL(file);
         });
+    }
+
+    getOutputMimeType(file) {
+        const type = (file.type || '').toLowerCase();
+        const extension = window.metadataTool?.getFileExtension(file.name);
+
+        if (type === 'image/png' || extension === 'png') {
+            return 'image/png';
+        }
+
+        return 'image/jpeg';
+    }
+
+    revokeCleanedFileUrl() {
+        if (this.cleanedFileUrl) {
+            URL.revokeObjectURL(this.cleanedFileUrl);
+            this.cleanedFileUrl = null;
+        }
+    }
+
+    escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
     }
 
     /**
@@ -298,6 +430,10 @@ class MetadataRemover {
                 }
             };
 
+            reader.onerror = () => {
+                this.displayResults(0);
+                resolve();
+            };
             reader.readAsDataURL(cleanedFile);
         });
     }
@@ -324,6 +460,10 @@ class MetadataRemover {
             <p class="status-text danger">⚠️ Contains sensitive data</p>
         `;
 
+        const beforeStatus = beforeMetadataDiv.querySelector('.status-text');
+        beforeStatus.className = `status-text ${this.originalMetadataCount > 0 ? 'danger' : 'success'}`;
+        beforeStatus.textContent = this.originalMetadataCount > 0 ? 'Contains metadata' : 'No metadata detected';
+
         // Display "after" state with remaining metadata count
         afterMetadataDiv.innerHTML = `
             <div class="metadata-count-display">
@@ -336,6 +476,11 @@ class MetadataRemover {
         // Calculate file size difference
         const sizeDiff = this.currentFile.size - this.cleanedFile.size;
         const percentChange = ((sizeDiff / this.currentFile.size) * 100).toFixed(2);
+        const sizeChangeText = sizeDiff > 0
+            ? `File size reduced by ${Math.abs(percentChange)}%`
+            : sizeDiff < 0
+                ? `File size increased by ${Math.abs(percentChange)}%`
+                : 'File size unchanged';
 
         cleanedFileInfo.innerHTML = `
             <div class="clean-summary">
@@ -343,18 +488,18 @@ class MetadataRemover {
                 <div class="summary-grid">
                     <div class="summary-item">
                         <strong>Original File:</strong>
-                        <span>${this.currentFile.name}</span>
-                        <span>${window.metadataTool.formatFileSize(this.currentFile.size)}</span>
+                        <span>${this.escapeHtml(this.currentFile.name)}</span>
+                        <span>${this.escapeHtml(window.metadataTool.formatFileSize(this.currentFile.size))}</span>
                     </div>
                     <div class="summary-item">
                         <strong>Cleaned File:</strong>
-                        <span>${this.cleanedFile.name}</span>
-                        <span>${window.metadataTool.formatFileSize(this.cleanedFile.size)}</span>
+                        <span>${this.escapeHtml(this.cleanedFile.name)}</span>
+                        <span>${this.escapeHtml(window.metadataTool.formatFileSize(this.cleanedFile.size))}</span>
                     </div>
                     <div class="summary-item highlight">
                         <strong>Metadata Removed:</strong>
                         <span>${this.originalMetadataCount} fields stripped</span>
-                        <span>File size reduced by ${Math.abs(percentChange)}%</span>
+                        <span>${sizeChangeText}</span>
                     </div>
                     <div class="summary-item success">
                         <strong>Security Status:</strong>
@@ -365,12 +510,13 @@ class MetadataRemover {
         `;
 
         // Setup download link for cleaned file
-        const url = URL.createObjectURL(this.cleanedFile);
-        downloadLink.href = url;
+        this.revokeCleanedFileUrl();
+        this.cleanedFileUrl = URL.createObjectURL(this.cleanedFile);
+        downloadLink.href = this.cleanedFileUrl;
         downloadLink.download = this.cleanedFile.name;
         downloadLink.onclick = () => {
             // Revoke object URL after download to free memory
-            setTimeout(() => URL.revokeObjectURL(url), 100);
+            setTimeout(() => this.revokeCleanedFileUrl(), 1000);
         };
 
         // Show results section and scroll into view

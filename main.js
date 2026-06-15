@@ -52,11 +52,18 @@ class MetadataTool {
         // Define upload areas for both viewer and remover tabs
         const areas = [
             { area: 'viewer-upload-area', input: 'viewer-file-input' },
-            { area: 'remover-upload-area', input: 'remover-file-input' }
+            { area: 'remover-upload-area', input: 'remover-file-input' },
+            { area: 'stego-encode-upload-area', input: 'stego-encode-file-input' },
+            { area: 'stego-decode-upload-area', input: 'stego-decode-file-input' }
         ];
 
         areas.forEach(({ area, input }) => {
             const el = document.getElementById(area);
+            const inputEl = document.getElementById(input);
+
+            if (!el || !inputEl) {
+                return;
+            }
 
             // Prevent default browser behavior for all drag events
             ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(ev => {
@@ -80,15 +87,52 @@ class MetadataTool {
             el.addEventListener('drop', e => {
                 const file = e.dataTransfer.files[0];
                 if (file) {
-                    // Transfer the dropped file to the hidden file input
-                    const dt = new DataTransfer();
-                    dt.items.add(file);
-                    document.getElementById(input).files = dt.files;
-                    // Trigger change event to process the file
-                    document.getElementById(input).dispatchEvent(new Event('change'));
+                    this.handleDroppedFile(input, inputEl, file);
                 }
             });
         });
+    }
+
+    /**
+     * Process a file dropped onto an upload area.
+     * Some browsers do not expose the DataTransfer constructor, so fall back to
+     * calling the owning module directly when assigning FileList is unavailable.
+     *
+     * @param {string} inputId - ID of the target file input
+     * @param {HTMLInputElement} inputEl - Target file input element
+     * @param {File} file - Dropped file
+     */
+    handleDroppedFile(inputId, inputEl, file) {
+        try {
+            if (typeof DataTransfer === 'function') {
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                inputEl.files = dt.files;
+                inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                return;
+            }
+        } catch (error) {
+            console.warn('Falling back to direct drop handling:', error);
+        }
+
+        if (inputId === 'viewer-file-input' && window.metadataViewer) {
+            window.metadataViewer.handleFileSelection(file);
+            return;
+        }
+
+        if (inputId === 'remover-file-input' && window.metadataRemover) {
+            window.metadataRemover.handleFileSelection(file);
+            return;
+        }
+
+        if (inputId === 'stego-encode-file-input' && window.steganographyTool) {
+            window.steganographyTool.handleEncodeFileSelection(file);
+            return;
+        }
+
+        if (inputId === 'stego-decode-file-input' && window.steganographyTool) {
+            window.steganographyTool.handleDecodeFileSelection(file);
+        }
     }
 
     /**
@@ -108,8 +152,8 @@ class MetadataTool {
     formatFileSize(bytes) {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
         return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
     }
 
@@ -141,10 +185,13 @@ class MetadataTool {
         if (type === 'error') icon = 'exclamation-circle';
         if (type === 'warning') icon = 'exclamation-triangle';
 
-        notification.innerHTML = `
-            <i class="fas fa-${icon}"></i>
-            <span>${message}</span>
-        `;
+        const iconEl = document.createElement('i');
+        iconEl.className = `fas fa-${icon}`;
+
+        const messageEl = document.createElement('span');
+        messageEl.textContent = message;
+
+        notification.append(iconEl, messageEl);
 
         document.body.appendChild(notification);
 
