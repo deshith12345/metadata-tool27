@@ -480,7 +480,11 @@ class MetadataViewer {
         const latDecimal = this.convertGPSToDecimal(gpsLat, gpsLatRef);
         const lonDecimal = this.convertGPSToDecimal(gpsLon, gpsLonRef);
 
-        if (latDecimal === null || lonDecimal === null) return;
+        if (!this.hasUsableGPSCoordinatePair(latDecimal, lonDecimal)) {
+            this.removeCoordinateMetadata(metadata);
+            metadata['GPS Location Status'] = 'No usable GPS coordinates embedded in this image';
+            return;
+        }
 
         metadata['GPS Decimal Latitude'] = latDecimal.toFixed(6);
         metadata['GPS Decimal Longitude'] = lonDecimal.toFixed(6);
@@ -500,6 +504,11 @@ class MetadataViewer {
         );
 
         if (!latitude || !longitude) return {};
+        if (!this.hasUsableGPSCoordinatePair(latitude.decimal, longitude.decimal)) {
+            return {
+                'GPS Location Status': 'No usable GPS coordinates embedded in this image'
+            };
+        }
 
         return {
             'GPS Latitude': latitude.display,
@@ -643,6 +652,8 @@ class MetadataViewer {
                 '37383': 'Metering Mode',
                 '37385': 'Flash',
                 '37386': 'Focal Length',
+                '37500': 'MakerNote',
+                '37510': 'User Comment',
                 '37520': 'Subsec Time',
                 '37521': 'Subsec Time Original',
                 '37522': 'Subsec Time Digitized',
@@ -701,19 +712,7 @@ class MetadataViewer {
                         if (tag === '3') gpsLonRef = value;
                     }
 
-                    // Format the value based on its type
-                    if (Array.isArray(value)) {
-                        if (ifd === 'GPS' && (tag === '2' || tag === '4')) {
-                            // Format GPS coordinates (latitude/longitude) specially
-                            value = this.formatGPSCoordinate(value);
-                        } else {
-                            // Join array values with commas
-                            value = value.join(', ');
-                        }
-                    } else if (typeof value === 'object') {
-                        // Convert complex objects to JSON string
-                        value = JSON.stringify(value);
-                    }
+                    value = this.formatExifDisplayValue(ifd, tag, value);
 
                     // Only include non-empty values
                     if (value !== undefined && value !== null && value !== '') {
@@ -728,14 +727,13 @@ class MetadataViewer {
             const latDecimal = this.convertGPSToDecimal(gpsLat, gpsLatRef);
             const lonDecimal = this.convertGPSToDecimal(gpsLon, gpsLonRef);
 
-            if (latDecimal !== null && lonDecimal !== null) {
+            if (this.hasUsableGPSCoordinatePair(latDecimal, lonDecimal)) {
                 metadata['GPS Decimal Latitude'] = latDecimal.toFixed(6);
                 metadata['GPS Decimal Longitude'] = lonDecimal.toFixed(6);
-            }
-
-            const mapLink = this.addGPSMapLink(gpsLat, gpsLon, gpsLatRef, gpsLonRef);
-            if (mapLink) {
-                metadata['Location on Map'] = mapLink;
+                metadata['Location on Map'] = this.createMapLink(latDecimal, lonDecimal);
+            } else {
+                this.removeCoordinateMetadata(metadata);
+                metadata['GPS Location Status'] = 'No usable GPS coordinates embedded in this image';
             }
         }
 
@@ -746,6 +744,73 @@ class MetadataViewer {
         });
 
         return metadata;
+    }
+
+    formatExifDisplayValue(ifd, tag, value) {
+        const tagNumber = Number(tag);
+
+        if (tagNumber === 37500) {
+            return this.summarizeBinaryValue('MakerNote', value);
+        }
+
+        if (Array.isArray(value)) {
+            if (ifd === 'GPS' && (tag === '2' || tag === '4')) {
+                return this.formatGPSCoordinate(value);
+            }
+
+            if (this.looksLikeByteArray(value) && value.length > 48) {
+                return this.summarizeBinaryValue('Binary EXIF', value);
+            }
+
+            return value.map(item => Array.isArray(item) ? item.join('/') : String(item)).join(', ');
+        }
+
+        if (typeof value === 'string') {
+            if (this.looksLikeBinaryString(value) || value.length > 500) {
+                return this.summarizeBinaryValue('EXIF text/binary', value);
+            }
+
+            return value;
+        }
+
+        if (value && typeof value === 'object') {
+            return JSON.stringify(value);
+        }
+
+        return value;
+    }
+
+    summarizeBinaryValue(label, value) {
+        const size = typeof value === 'string' ? value.length : Array.isArray(value) ? value.length : 0;
+        const unit = typeof value === 'string' ? 'characters' : 'bytes';
+        return `${label} data hidden from preview (${size} ${unit}). Export JSON to inspect the raw value.`;
+    }
+
+    looksLikeByteArray(value) {
+        return Array.isArray(value) && value.every(item => Number.isInteger(item) && item >= 0 && item <= 255);
+    }
+
+    looksLikeBinaryString(value) {
+        if (!value) return false;
+
+        let suspicious = 0;
+        for (let index = 0; index < value.length; index++) {
+            const code = value.charCodeAt(index);
+            const allowedWhitespace = code === 9 || code === 10 || code === 13;
+            if ((!allowedWhitespace && code < 32) || code === 65533) {
+                suspicious++;
+            }
+        }
+
+        return suspicious / value.length > 0.08;
+    }
+
+    removeCoordinateMetadata(metadata) {
+        delete metadata['GPS Latitude'];
+        delete metadata['GPS Longitude'];
+        delete metadata['GPS Decimal Latitude'];
+        delete metadata['GPS Decimal Longitude'];
+        delete metadata['Location on Map'];
     }
 
     /**
@@ -788,9 +853,13 @@ class MetadataViewer {
             seconds = coord[2];
         } else {
             // Convert rational arrays [[n,d], [n,d], [n,d]]
-            degrees = this.convertRational(coord[0]);
-            minutes = this.convertRational(coord[1]);
-            seconds = this.convertRational(coord[2]);
+            degrees = this.convertRationalStrict(coord[0]);
+            minutes = this.convertRationalStrict(coord[1]);
+            seconds = this.convertRationalStrict(coord[2]);
+        }
+
+        if (![degrees, minutes, seconds].every(Number.isFinite)) {
+            return 'GPS coordinates are not embedded';
         }
 
         // Validate and sanitize
@@ -816,7 +885,7 @@ class MetadataViewer {
         const lat = this.convertGPSToDecimal(latitude, latRef);
         const lon = this.convertGPSToDecimal(longitude, lonRef);
 
-        if (lat !== null && lon !== null) {
+        if (this.hasUsableGPSCoordinatePair(lat, lon)) {
             return this.createMapLink(lat, lon);
         }
         return null;
@@ -845,9 +914,13 @@ class MetadataViewer {
             minutes = coord[1];
             seconds = coord[2];
         } else {
-            degrees = this.convertRational(coord[0]);
-            minutes = this.convertRational(coord[1]);
-            seconds = this.convertRational(coord[2]);
+            degrees = this.convertRationalStrict(coord[0]);
+            minutes = this.convertRationalStrict(coord[1]);
+            seconds = this.convertRationalStrict(coord[2]);
+        }
+
+        if (![degrees, minutes, seconds].every(Number.isFinite)) {
+            return null;
         }
 
         let decimal = degrees + (minutes / 60) + (seconds / 3600);
@@ -858,7 +931,13 @@ class MetadataViewer {
             decimal *= -1;
         }
 
-        return this.sanitizeNumber(decimal);
+        return Number.isFinite(decimal) ? decimal : null;
+    }
+
+    hasUsableGPSCoordinatePair(lat, lon) {
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+        if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+        return !(Math.abs(lat) < 0.000001 && Math.abs(lon) < 0.000001);
     }
 
     normalizeGPSRef(ref) {
@@ -871,6 +950,19 @@ class MetadataViewer {
         }
 
         return String(ref || '').trim().toUpperCase();
+    }
+
+    convertRationalStrict(rational) {
+        if (!Array.isArray(rational) || rational.length !== 2) return null;
+
+        const numerator = Number(rational[0]);
+        const denominator = Number(rational[1]);
+
+        if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+            return null;
+        }
+
+        return numerator / denominator;
     }
 
     /**
